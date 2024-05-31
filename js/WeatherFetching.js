@@ -224,10 +224,11 @@ function fetchRadarImages(){
       "national": 0.6
     }
   }));
-  radarImage.setAttribute("src", "https://radar.weather.gov/?settings=v1_" + mapSettings);
+  radarImage.setAttribute("src", `./radar.html?zoom=8&latitude=${latitude}&longitude=${longitude}`);
+  //radarImage.setAttribute("src", "https://radar.weather.gov/?settings=v1_" + mapSettings);
   radarImage.style.width = "1230px"
   radarImage.style.height = "740px"
-  radarImage.style.marginTop = "-220px"
+  //radarImage.style.marginTop = "-220px"
   radarImage.style.overflow = "hidden"
   
   if(alertsActive){
@@ -264,11 +265,12 @@ function fetchRadarImages(){
         "national": 0.6
       }
     }));
-    zoomedRadarImage.setAttribute("src", "https://radar.weather.gov/?settings=v1_" + mapSettings);
-    zoomedRadarImage.style.width = "1230px"
-    zoomedRadarImage.style.height = "740px"
-    zoomedRadarImage.style.marginTop = "-220px"
-    zoomedRadarImage.style.overflow = "hidden"
+    radarImage.setAttribute("src", `./radar.html?zoom=10&latitude=${latitude}&longitude=${longitude}`);
+  //radarImage.setAttribute("src", "https://radar.weather.gov/?settings=v1_" + mapSettings);
+  radarImage.style.width = "1230px"
+  radarImage.style.height = "740px"
+  //radarImage.style.marginTop = "-220px"
+  radarImage.style.overflow = "hidden"
   }
 
   scheduleTimeline();

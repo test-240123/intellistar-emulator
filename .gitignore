@@ -2,3 +2,7 @@ desktop.ini
 *.swp
 .DS_Store
 /.vs
+node
+./node_modules
+test.js
+node_modules

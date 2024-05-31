@@ -1,0 +1,270 @@
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8' />
+  <title>Our Radar</title>
+  <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+  <script src='https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.js'></script>
+  <link rel="stylesheet" href="/assets/navbar.css">
+  <link href='https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css' rel='stylesheet' />
+<style>
+    body { margin: 0; padding: 0; background-color: rgb(15, 15, 15); }
+#map { position: absolute; top: 0px; bottom: 0px; width: 100%; }
+a {color: white;}
+    </style>
+  <link rel="icon" type="image/x-icon" href="/assets/mn-logo.jpg">
+</head>
+<body>
+<div id='map'></div>
+
+<script>
+        let radarForecast = "radar";
+        let series = [];
+        let tim;
+        let radarLayerUrls = [];
+        let map; // Define map variable outside the event listener function
+
+        async function fetchWithCache(request) {
+            try {
+                const cache = await caches.open('weather-data-cache');
+            const cachedResponse = await cache.match(request);
+            if (cachedResponse) {
+                return cachedResponse;
+            } else {
+                const response = await fetch(request);
+                if (response.status === 200) {
+                    cache.put(request, response.clone());
+                }
+                return response;
+            }
+            } catch {
+                const res = await fetch(request)
+                return res;
+            }
+        }
+
+        async function fetchData() {
+            const response = await fetch("https://api.weather.com/v3/TileServer/series/productSet/PPAcore?apiKey=bbd90b15bb534e3c990b15bb53fe3c03");
+            const data = await response.json();
+            data.seriesInfo[radarForecast].series.forEach(serie => {
+                if (!series.includes(serie.ts)) {
+                    series.push(serie.ts);
+                }
+            });
+
+            // Preload all radar imagery URLs
+            radarLayerUrls = series.map(ts => `https://api.weather.com/v3/TileServer/tile/${radarForecast}?ts=${ts}&xyz={x}:{y}:{z}&apiKey=bbd90b15bb534e3c990b15bb53fe3c03`);
+
+            // Initialize map after preloading
+            initializeMap();
+        }
+        function initializeMap() {
+            map = new mapboxgl.Map({
+                container: 'map',
+                style: 'mapbox://styles/mapbox/navigation-day-v1',
+                center: [location.href.split("&latitude=")[1].split("&longitude=")[1], location.href.split("&latitude=")[1].split("&longitude=")[0]], // Default to the center of the United States
+                zoom: location.href.split("?zoom=")[1].split("&latitude=")[0] // Default zoom level
+            });
+
+            map.on('load', function () {
+                    // Display initial radar imagery
+                updateMapLayer(radarLayerUrls[radarLayerUrls.length - 1]);
+                const index = Math.floor((1 - (98 / 100)) * series.length);
+                tim = series[index];
+                updateMapLayer(radarLayerUrls[index]);
+                // Preload next frames
+                preloadNextFrames();
+            });
+        }
+
+        async function preloadNextFrames() {
+            // Preload all radar imagery URLs except the last one
+            for (let i = 0; i < radarLayerUrls.length - 1; i++) {
+                const img = new Image();
+                img.src = radarLayerUrls[i];
+            }
+        }
+
+        async function updateMapLayer(radarLayerUrl) {
+            // Add new radar layer
+            if (map.getLayer('weather-tiles')) {
+                map.removeLayer('weather-tiles');
+            }
+            if (map.getSource('weather-tiles')) {
+                map.removeSource('weather-tiles');
+            }
+
+            map.addSource('weather-tiles', {
+                type: 'raster',
+                tiles: [radarLayerUrl],
+                tileSize: 256,
+                opacity: 0.5
+            });
+
+            map.addLayer({
+                'id': 'weather-tiles',
+                'type': 'raster',
+                'source': 'weather-tiles',
+                'minzoom': 0,
+                'maxzoom': 18,
+                'paint': {
+                    'raster-opacity': 0.8, // Set the opacity to 50%
+                    'raster-fade-duration': 0
+                }
+            });
+        }
+
+const slider = {value:100}
+        function runSlider() {
+            slider.value = 0;
+            setInterval(() => {
+                if (slider.value < 100) {
+                    slider.value = slider.value + 6.25;
+                    const index = Math.floor((1 - (slider.value / 100)) * series.length);
+                    tim = series[index];
+                    updateMapLayer(radarLayerUrls[index]);
+                }
+            }, 500);
+        }
+
+        runSlider()
+
+        async function fetchAlertData() {
+            const response = await fetch("https://api.weather.com/v3/alerts/headlines?countryCode=US&format=json&language=en-US&apiKey=bbd90b15bb534e3c990b15bb53fe3c03");
+            const data = await response.json();
+            for (const alert of data.alerts) {
+                const detailResponse = await fetchWithCache(`https://api.weather.com/v3/alerts/detail?alertId=${alert.detailKey}&format=json&language=en-US&apiKey=bbd90b15bb534e3c990b15bb53fe3c03`);
+                if(detailResponse.status == 200) {
+                    const alertDetail = await detailResponse.json();
+
+                    if (alertDetail.alertDetail.geospatialShapes && alertDetail.alertDetail.geospatialShapes.features.length > 0) {
+                        drawPolygon(alertDetail.alertDetail.geospatialShapes.features[0].geometry.coordinates[0], alertDetail);
+                    } else {
+                        console.log("No polygon data available for this alert.");
+                    }
+                }
+                
+            }
+        }
+
+        function drawPolygon(coordinates, eventDescription) {
+            const polygonColor = getPolygonColor(eventDescription.alertDetail.eventDescription);
+            let supplement = "No threat supplement listed.";
+            if (eventDescription.alertDetail.supplement) {
+                const suppl = eventDescription.alertDetail.supplement;
+                supplement = `Hail: ${suppl.hailThreat || "None"} MAX ${suppl.maxHailSize || "None"}, Tornado: ${suppl.tornado || "None"}, Wind: ${suppl.windThreat || "None"} MAX ${suppl.maxWindGust || "None"}, TSTM Damage: ${suppl.thunderstormDamageThreat || "None"}`;
+            }
+            const polygon = {
+                'type': 'geojson',
+                'data': {
+                    'type': 'Feature',
+                    'geometry': {
+                        'type': 'Polygon',
+                        'coordinates': [coordinates]
+                    },
+                    'properties': {
+                        'headline': eventDescription.alertDetail.headlineText,
+                        'office': `${eventDescription.alertDetail.source} in ${eventDescription.alertDetail.officeName}, ${eventDescription.alertDetail.officeAdminDistrict}`,
+                        'supplement': supplement
+                    }
+                }
+            };
+
+            const polygonId = `alert-polygon-${Math.random().toString(36).substr(2, 9)}`;
+
+            map.addSource(polygonId, polygon);
+
+            map.addLayer({
+                'id': polygonId,
+                'type': 'fill',
+                'source': polygonId,
+                'layout': {},
+                'paint': {
+                    'fill-color': polygonColor,
+                    'fill-opacity': 0.25
+                }
+            });
+
+            // Add a click event listener for the polygon
+            map.on('click', polygonId, function (e) {
+                const coordinates = e.lngLat;
+                new mapboxgl.Popup()
+                    .setLngLat(coordinates)
+                    .setHTML(`<h2>${e.features[0].properties.headline}</h2>by ${e.features[0].properties.office}<br><br>${e.features[0].properties.supplement}`)
+                    .addTo(map);
+            });
+
+            // Change the cursor to a pointer when over the polygon
+            map.on('mouseenter', polygonId, function () {
+                map.getCanvas().style.cursor = 'pointer';
+            });
+
+            // Change it back to default when it leaves
+            map.on('mouseleave', polygonId, function () {
+                map.getCanvas().style.cursor = '';
+            });
+        }
+
+        function getPolygonColor(eventDescription) {
+            // Define colors based on event descriptions
+            const warningColors = {
+              'Flood Warning': '#ff0000',
+              'Severe Thunderstorm Warning': '#ffa500',
+              'Tornado Warning': '#800000',
+              'Winter Storm Warning': '#0000ff',
+              'Special Weather Statement': '#FF00FF',
+              'Flash Flood Warning': '#ff0000',
+              'Blizzard Warning': '#0000ff',
+              'Hurricane Warning': '#800080',
+              'Tropical Storm Warning': '#008000',
+              'Extreme Wind Warning': '#800080',
+              'High Wind Warning': '#800080',
+              'Dust Storm Warning': '#ffff00',
+              'Severe Weather Statement': '#FF00FF',
+              'Fire Weather Warning': '#ff0000',
+              'Red Flag Warning': '#ff0000',
+              'Heat Advisory': '#ff4500',
+              'Excessive Heat Warning': '#ff4500',
+              'Freeze Warning': '#0000ff',
+              'Frost Advisory': '#0000ff',
+              'Heat Watch': '#ff4500',
+              'Wind Chill Warning': '#0000ff',
+              'Wind Chill Advisory': '#0000ff',
+              'Winter Weather Advisory': '#0000ff',
+              'Tropical Storm Watch': '#008000',
+              'Hurricane Watch': '#800080',
+              'High Wind Watch': '#800080',
+              'Severe Thunderstorm Watch': '#ffa500',
+              'Tornado Watch': '#800000',
+              'Blizzard Watch': '#0000ff',
+              'Flash Flood Watch': '#ff0000',
+              'Flood Watch': '#ff0000',
+              'Winter Storm Watch': '#0000ff',
+              'Severe Weather Watch': '#FF00FF',
+              'Fire Weather Watch': '#ff0000',
+              'Red Flag Watch': '#ff0000',
+              'Heat Watch': '#ff4500',
+              'Wind Chill Watch': '#0000ff',
+              'Winter Weather Watch': '#0000ff',
+              'Dense Fog Advisory': '#778899',
+              'Freezing Fog Advisory': '#778899',
+              'Small Craft Advisory': '#008080',
+              'Gale Warning': '#008080',
+              'Storm Warning': '#0000ff',
+              'Tropical Storm Advisory': '#008000',
+              'Hurricane Advisory': '#800080',
+              'Tsunami Advisory': '#00FFFF',
+              'Tsunami Warning': '#00FFFF'
+                      };
+          
+
+            return warningColors[eventDescription] || '#00ff00'; // Default color
+        }
+
+mapboxgl.accessToken = 'pk.eyJ1IjoiZGFsa2dnIiwiYSI6ImNsZ2RubGw2ajBhZmwzeHBpdTZsdzcyMG4ifQ.YXEX-PUrpvMqK_1v_e0I_A';
+    fetchData();
+</script>
+</body>
+</html>
